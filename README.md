@@ -76,6 +76,7 @@ The server supports these environment variables:
 
 - `PORT` (default: `3400`)
 - `HOSTNAME` (default: `0.0.0.0`)
+- `JWT_SECRET` (recommended), or `AUTH_SECRET` / `NEXTAUTH_SECRET` as alternatives for auth token signing
 
 ## Real-Time Events
 

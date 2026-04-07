@@ -4,16 +4,26 @@ import type { SessionPayload } from "@/lib/auth/types";
 export const AUTH_COOKIE_NAME = "unisphere_auth";
 
 const encoder = new TextEncoder();
+const fallbackSecret = "dev-only-unisphere-secret-change-me";
+let didWarnMissingSecret = false;
+
+function resolveJwtSecret(): string | undefined {
+  const candidates = [process.env.JWT_SECRET, process.env.AUTH_SECRET, process.env.NEXTAUTH_SECRET];
+  return candidates.find((item) => typeof item === "string" && item.trim().length > 0)?.trim();
+}
 
 function getJwtSecret(): Uint8Array {
-  const secret = process.env.JWT_SECRET;
+  const secret = resolveJwtSecret();
 
   if (!secret) {
-    if (process.env.NODE_ENV === "production") {
-      throw new Error("JWT_SECRET is required in production");
+    if (!didWarnMissingSecret) {
+      didWarnMissingSecret = true;
+      console.warn(
+        "[auth] No JWT secret found (JWT_SECRET / AUTH_SECRET / NEXTAUTH_SECRET). Using fallback secret."
+      );
     }
 
-    return encoder.encode("dev-only-unisphere-secret-change-me");
+    return encoder.encode(fallbackSecret);
   }
 
   return encoder.encode(secret);
