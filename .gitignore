@@ -33,6 +33,23 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# local auth data
+/data/users.json
+/data/resources.json
+/data/doubts.json
+/data/placement.json
+/data/tasks.json
+/data/expenses.json
+/data/analytics.json
+/data/groups.json
+/data/connections.json
+/data/mentorship.json
+/data/notifications.json
+/data/scheduler.json
+/data/campus.json
+/data/notes.json
+/data/uploads/
+
 # vercel
 .vercel
 

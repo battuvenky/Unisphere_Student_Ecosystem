@@ -1,0 +1,16 @@
+{
+  "announcements": [
+    {
+      "id": "demo-announcement-orientation",
+      "title": "Campus Orientation Week",
+      "message": "Orientation activities begin Monday 9:00 AM in the main auditorium. Attendance is mandatory for first-year students.",
+      "createdBy": {
+        "id": "demo-admin-1",
+        "name": "Dr. Kavya Menon"
+      },
+      "isPinned": true,
+      "createdAt": "2026-03-28T09:00:00.000Z",
+      "updatedAt": "2026-03-28T09:00:00.000Z"
+    }
+  ]
+}
