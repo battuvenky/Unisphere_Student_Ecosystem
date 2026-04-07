@@ -1,36 +1,108 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# UniSphere
+
+## Live Preview
+
+[https://unisphere-drab.vercel.app/](https://unisphere-drab.vercel.app/)
+
+## Overview
+
+UniSphere is a student ecosystem platform built for campus productivity, collaboration, and engagement. The application combines workspace modules, real-time interactions, and role-based experiences in a single unified interface.
+
+## Core Capabilities
+
+- Authentication flows for sign up and login
+- Modular workspace features (tasks, notes, resources, mentorship, groups, analytics, and more)
+- Real-time communication signals powered by Socket.IO
+- API-first structure with dedicated routes for each domain
+- Local JSON-backed data storage for rapid development
+
+## Tech Stack
+
+- Next.js 16 (App Router)
+- React 19
+- TypeScript
+- Tailwind CSS 4
+- Socket.IO
+- Zod
+
+## Project Structure
+
+```text
+unisphere/
+	data/                   Local JSON data files
+	public/                 Static assets
+	src/
+		app/                  App Router pages and API routes
+			(workspace)/        Authenticated workspace modules
+			api/                Backend route handlers
+			login/              Login page
+			signup/             Signup page
+		components/           Shared and module-specific UI components
+		lib/                  Business logic, stores, auth, realtime utilities
+	server.js               Custom Next.js + Socket.IO server
+```
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
+
+- Node.js 20 or higher
+- npm 10 or higher
+
+### Installation
+
+```bash
+npm install
+```
+
+### Development
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+By default, the app runs at [http://localhost:3400](http://localhost:3400).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Available Scripts
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `npm run dev`: Start development server using `server.js`
+- `npm run build`: Build production assets
+- `npm run start`: Start production server (`node server.js --prod`)
+- `npm run lint`: Run ESLint checks
 
-## Learn More
+## Runtime Configuration
 
-To learn more about Next.js, take a look at the following resources:
+The server supports these environment variables:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `PORT` (default: `3400`)
+- `HOSTNAME` (default: `0.0.0.0`)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Real-Time Events
 
-## Deploy on Vercel
+Socket.IO is configured with `/socket.io` and supports websocket with polling fallback. Current event channels include:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- `realtime:ready`
+- `user:join`
+- `connections:typing`
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Deployment
+
+This project is production-ready for platforms that support Next.js server workloads.
+
+Recommended steps:
+
+1. Build with `npm run build`
+2. Start with `npm run start`
+3. Configure `PORT` and `HOSTNAME` in your hosting environment
+4. Ensure websocket upgrades are enabled for Socket.IO
+
+## Contributing
+
+1. Create a feature branch
+2. Keep changes scoped to clear modules
+3. Run lint checks before pushing
+4. Open a pull request with a short testing summary
+
+## License
+
+No license file is currently defined in this repository.
