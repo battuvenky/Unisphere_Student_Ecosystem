@@ -139,16 +139,41 @@ const demoUsers: UserRecord[] = [
   },
 ];
 
-const dataDir = path.join(process.cwd(), "data");
-const usersFile = path.join(dataDir, "users.json");
+const bundledDataDir = path.join(process.cwd(), "data");
+const configuredDataDir = process.env.DATA_DIR?.trim();
+const runtimeDataDir = configuredDataDir
+  ? path.resolve(configuredDataDir)
+  : process.env.VERCEL
+    ? path.join("/tmp", "unisphere-data")
+    : bundledDataDir;
+
+const usersFile = path.join(runtimeDataDir, "users.json");
+const bundledUsersFile = path.join(bundledDataDir, "users.json");
+
+async function loadInitialStore(): Promise<UsersStore> {
+  try {
+    const rawBundledStore = await readFile(bundledUsersFile, "utf8");
+    const parsed = JSON.parse(rawBundledStore) as UsersStore;
+
+    if (Array.isArray(parsed?.users)) {
+      return {
+        users: parsed.users.map(normalizeUserRecord),
+      };
+    }
+  } catch {
+    // Fall back to demo users when bundled seed data is unavailable.
+  }
+
+  return { users: demoUsers };
+}
 
 async function ensureStoreFile() {
-  await mkdir(dataDir, { recursive: true });
+  await mkdir(runtimeDataDir, { recursive: true });
 
   try {
     await readFile(usersFile, "utf8");
   } catch {
-    const initial: UsersStore = { users: demoUsers };
+    const initial = await loadInitialStore();
     await writeFile(usersFile, JSON.stringify(initial, null, 2), "utf8");
   }
 }
