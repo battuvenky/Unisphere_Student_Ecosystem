@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
-import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
+import { loadStore, saveStore } from "@/lib/mongo-store";
 
 export type NoteCategory =
   | "general"
@@ -42,25 +42,20 @@ function normalizeTag(tag: string) {
   return tag.trim().toLowerCase().replace(/\s+/g, "-");
 }
 
-async function ensureStoreFile() {
-  await mkdir(dataDir, { recursive: true });
-
-  try {
-    await readFile(notesFile, "utf8");
-  } catch {
-    const initial: NotesStore = { notes: [] };
-    await writeFile(notesFile, JSON.stringify(initial, null, 2), "utf8");
-  }
-}
-
 async function readStore(): Promise<NotesStore> {
-  await ensureStoreFile();
-  const raw = await readFile(notesFile, "utf8");
-  return JSON.parse(raw) as NotesStore;
+  return loadStore<NotesStore>({
+    collectionName: "notes",
+    legacyFilePath: notesFile,
+    initialValue: { notes: [] },
+  });
 }
 
 async function writeStore(store: NotesStore) {
-  await writeFile(notesFile, JSON.stringify(store, null, 2), "utf8");
+  await saveStore({
+    collectionName: "notes",
+    legacyFilePath: notesFile,
+    value: store,
+  });
 }
 
 async function ensureSeedDataForUser(userId: string): Promise<NotesStore> {

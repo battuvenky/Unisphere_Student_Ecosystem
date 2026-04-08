@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
-import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 import type { UserRole } from "@/lib/auth/types";
+import { loadStore, saveStore } from "@/lib/mongo-store";
 
 export type VoteValue = -1 | 0 | 1;
 
@@ -99,21 +99,12 @@ function sanitizeTags(tags: string[]): string[] {
   );
 }
 
-async function ensureStoreFile() {
-  await mkdir(dataDir, { recursive: true });
-
-  try {
-    await readFile(doubtsFile, "utf8");
-  } catch {
-    const initial: DoubtsStore = { questions: [], answers: [], comments: [] };
-    await writeFile(doubtsFile, JSON.stringify(initial, null, 2), "utf8");
-  }
-}
-
 async function readStore(): Promise<DoubtsStore> {
-  await ensureStoreFile();
-  const raw = await readFile(doubtsFile, "utf8");
-  const store = JSON.parse(raw) as DoubtsStore;
+  const store = await loadStore<DoubtsStore>({
+    collectionName: "doubts",
+    legacyFilePath: doubtsFile,
+    initialValue: { questions: [], answers: [], comments: [] },
+  });
   const normalized = normalizeStore(store);
   const changed = seedDemoThread(store);
   if (changed || normalized) {
@@ -150,7 +141,11 @@ function normalizeStore(store: DoubtsStore): boolean {
 }
 
 async function writeStore(store: DoubtsStore) {
-  await writeFile(doubtsFile, JSON.stringify(store, null, 2), "utf8");
+  await saveStore({
+    collectionName: "doubts",
+    legacyFilePath: doubtsFile,
+    value: store,
+  });
 }
 
 function seedDemoThread(store: DoubtsStore): boolean {

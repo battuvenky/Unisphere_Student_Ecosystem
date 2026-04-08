@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
-import { mkdir, readFile, writeFile } from "fs/promises";
+import { writeFile } from "fs/promises";
 import path from "path";
+import { loadStore, saveStore } from "@/lib/mongo-store";
 
 export type GroupMessageType = "text" | "resource";
 
@@ -48,29 +49,24 @@ function createAccessCode() {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
 }
 
-async function ensureStoreFile() {
-  await mkdir(dataDir, { recursive: true });
-
-  try {
-    await readFile(groupsFile, "utf8");
-  } catch {
-    const initial: GroupsStore = {
+async function readStore() {
+  return loadStore<GroupsStore>({
+    collectionName: "groups",
+    legacyFilePath: groupsFile,
+    initialValue: {
       groups: [],
       memberships: [],
       messages: [],
-    };
-    await writeFile(groupsFile, JSON.stringify(initial, null, 2), "utf8");
-  }
-}
-
-async function readStore() {
-  await ensureStoreFile();
-  const raw = await readFile(groupsFile, "utf8");
-  return JSON.parse(raw) as GroupsStore;
+    },
+  });
 }
 
 async function writeStore(store: GroupsStore) {
-  await writeFile(groupsFile, JSON.stringify(store, null, 2), "utf8");
+  await saveStore({
+    collectionName: "groups",
+    legacyFilePath: groupsFile,
+    value: store,
+  });
 }
 
 async function ensureStarterGroupForUser(userId: string) {

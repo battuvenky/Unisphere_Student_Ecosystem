@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
-import { mkdir, readFile, writeFile } from "fs/promises";
+import { writeFile } from "fs/promises";
 import path from "path";
+import { loadStore, saveStore } from "@/lib/mongo-store";
 
 export type CampusIssueCategory = "hostel" | "mess" | "cleanliness" | "electricity" | "water";
 export type CampusTicketStatus = "open" | "in_progress" | "resolved";
@@ -122,24 +123,15 @@ function defaultMessMenu(): MessMenuDay[] {
   ];
 }
 
-async function ensureStoreFile() {
-  await mkdir(dataDir, { recursive: true });
-
-  try {
-    await readFile(campusFile, "utf8");
-  } catch {
-    const initial: CampusStore = {
+async function readStore(): Promise<CampusStore> {
+  const parsed = await loadStore<Partial<CampusStore>>({
+    collectionName: "campus",
+    legacyFilePath: campusFile,
+    initialValue: {
       tickets: [],
       messMenu: defaultMessMenu(),
-    };
-    await writeFile(campusFile, JSON.stringify(initial, null, 2), "utf8");
-  }
-}
-
-async function readStore(): Promise<CampusStore> {
-  await ensureStoreFile();
-  const raw = await readFile(campusFile, "utf8");
-  const parsed = JSON.parse(raw) as Partial<CampusStore>;
+    },
+  });
 
   return {
     tickets: parsed.tickets ?? [],
@@ -148,7 +140,11 @@ async function readStore(): Promise<CampusStore> {
 }
 
 async function writeStore(store: CampusStore) {
-  await writeFile(campusFile, JSON.stringify(store, null, 2), "utf8");
+  await saveStore({
+    collectionName: "campus",
+    legacyFilePath: campusFile,
+    value: store,
+  });
 }
 
 async function ensureSeedTicketsForUser(userId: string): Promise<CampusStore> {

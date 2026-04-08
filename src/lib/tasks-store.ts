@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
-import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
+import { loadStore, saveStore } from "@/lib/mongo-store";
 
 export type TaskStatus = "todo" | "in_progress" | "done";
 export type TaskPriority = "low" | "medium" | "high";
@@ -52,25 +52,20 @@ function userHash(userId: string) {
   return userId.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
 }
 
-async function ensureStoreFile() {
-  await mkdir(dataDir, { recursive: true });
-
-  try {
-    await readFile(tasksFile, "utf8");
-  } catch {
-    const initial: TasksStore = { tasks: [] };
-    await writeFile(tasksFile, JSON.stringify(initial, null, 2), "utf8");
-  }
-}
-
 async function readStore(): Promise<TasksStore> {
-  await ensureStoreFile();
-  const raw = await readFile(tasksFile, "utf8");
-  return JSON.parse(raw) as TasksStore;
+  return loadStore<TasksStore>({
+    collectionName: "tasks",
+    legacyFilePath: tasksFile,
+    initialValue: { tasks: [] },
+  });
 }
 
 async function writeStore(store: TasksStore) {
-  await writeFile(tasksFile, JSON.stringify(store, null, 2), "utf8");
+  await saveStore({
+    collectionName: "tasks",
+    legacyFilePath: tasksFile,
+    value: store,
+  });
 }
 
 async function ensureSeedDataForUser(userId: string): Promise<TasksStore> {

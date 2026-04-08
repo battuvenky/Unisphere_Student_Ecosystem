@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { setAuthCookie } from "@/lib/auth/cookie";
 import { createSessionToken } from "@/lib/auth/session";
-import { findUserByEmail, toSessionUser } from "@/lib/users-store";
+import { findUserByEmail, recordUserLogin, toSessionUser } from "@/lib/users-store";
 
 const loginSchema = z.object({
   email: z.email("Enter a valid email address").toLowerCase(),
@@ -35,6 +35,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
     }
 
+    const forwardedFor = request.headers.get("x-forwarded-for") ?? "";
+    const ip = forwardedFor.split(",")[0]?.trim() ?? "";
+    const userAgent = request.headers.get("user-agent") ?? "";
+
+    await recordUserLogin({
+      userId: user.id,
+      ip,
+      userAgent,
+      source: "login",
+    });
+
     const token = await createSessionToken({
       sub: user.id,
       email: user.email,
@@ -44,12 +55,14 @@ export async function POST(request: Request) {
     const response = NextResponse.json({
       success: true,
       user: toSessionUser(user),
+      token,
       message: "Login successful",
     });
 
     setAuthCookie(response, token);
     return response;
-  } catch {
-    return NextResponse.json({ error: "Could not log in" }, { status: 500 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not log in";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

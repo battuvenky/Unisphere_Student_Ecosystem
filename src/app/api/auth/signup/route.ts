@@ -4,7 +4,7 @@ import { z } from "zod";
 import { setAuthCookie } from "@/lib/auth/cookie";
 import { createSessionToken } from "@/lib/auth/session";
 import type { UserRole } from "@/lib/auth/types";
-import { createUser, toSessionUser } from "@/lib/users-store";
+import { createUser, recordUserLogin, toSessionUser } from "@/lib/users-store";
 
 const signupSchema = z.object({
   email: z.email("Enter a valid email address").toLowerCase(),
@@ -78,6 +78,17 @@ export async function POST(request: Request) {
       },
     });
 
+    const forwardedFor = request.headers.get("x-forwarded-for") ?? "";
+    const ip = forwardedFor.split(",")[0]?.trim() ?? "";
+    const userAgent = request.headers.get("user-agent") ?? "";
+
+    await recordUserLogin({
+      userId: user.id,
+      ip,
+      userAgent,
+      source: "signup",
+    });
+
     const token = await createSessionToken({
       sub: user.id,
       email: user.email,
@@ -87,6 +98,7 @@ export async function POST(request: Request) {
     const response = NextResponse.json({
       success: true,
       user: toSessionUser(user),
+      token,
       message: "Account created successfully",
     });
 

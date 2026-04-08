@@ -1,9 +1,8 @@
 const { createServer } = require("node:http");
 const next = require("next");
+const { loadEnvConfig } = require("@next/env");
 const { Server } = require("socket.io");
 
-const hostname = process.env.HOSTNAME || "0.0.0.0";
-const port = Number(process.env.PORT || 3400);
 const isProduction = process.argv.includes("--prod");
 const dev = !isProduction;
 
@@ -12,6 +11,11 @@ if (isProduction) {
 } else if (!process.env.NODE_ENV) {
   process.env.NODE_ENV = "development";
 }
+
+loadEnvConfig(process.cwd(), dev);
+
+const hostname = process.env.HOSTNAME || "0.0.0.0";
+const port = Number(process.env.PORT || 3400);
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();

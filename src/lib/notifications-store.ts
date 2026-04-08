@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
-import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 import { listTasks } from "@/lib/tasks-store";
+import { loadStore, saveStore } from "@/lib/mongo-store";
 
 export type NotificationType = "task" | "exam" | "event" | "friend" | "message" | "comment" | "reply";
 export type NotificationPriority = "low" | "medium" | "high";
@@ -49,25 +49,20 @@ function daysUntil(deadlineIsoDate: string) {
   return Math.floor(diffMs / 86_400_000);
 }
 
-async function ensureStoreFile() {
-  await mkdir(dataDir, { recursive: true });
-
-  try {
-    await readFile(notificationsFile, "utf8");
-  } catch {
-    const initial: NotificationsStore = { notifications: [] };
-    await writeFile(notificationsFile, JSON.stringify(initial, null, 2), "utf8");
-  }
-}
-
 async function readStore(): Promise<NotificationsStore> {
-  await ensureStoreFile();
-  const raw = await readFile(notificationsFile, "utf8");
-  return JSON.parse(raw) as NotificationsStore;
+  return loadStore<NotificationsStore>({
+    collectionName: "notifications",
+    legacyFilePath: notificationsFile,
+    initialValue: { notifications: [] },
+  });
 }
 
 async function writeStore(store: NotificationsStore) {
-  await writeFile(notificationsFile, JSON.stringify(store, null, 2), "utf8");
+  await saveStore({
+    collectionName: "notifications",
+    legacyFilePath: notificationsFile,
+    value: store,
+  });
 }
 
 function userHash(userId: string) {

@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { mkdir, readFile, unlink, writeFile } from "fs/promises";
 import path from "path";
+import { loadStore, saveStore } from "@/lib/mongo-store";
 
 export type ResourceType = "pdf" | "doc" | "slide" | "image" | "archive" | "other";
 
@@ -142,21 +143,16 @@ function sanitizeName(fileName: string): string {
 }
 
 async function ensureStoreFile() {
-  await mkdir(dataDir, { recursive: true });
   await mkdir(uploadsDir, { recursive: true });
-
-  try {
-    await readFile(resourcesFile, "utf8");
-  } catch {
-    const initial: ResourcesStore = { resources: [] };
-    await writeFile(resourcesFile, JSON.stringify(initial, null, 2), "utf8");
-  }
 }
 
 async function readStore(): Promise<ResourcesStore> {
   await ensureStoreFile();
-  const raw = await readFile(resourcesFile, "utf8");
-  const store = JSON.parse(raw) as ResourcesStore;
+  const store = await loadStore<ResourcesStore>({
+    collectionName: "resources",
+    legacyFilePath: resourcesFile,
+    initialValue: { resources: [] },
+  });
   const changed = await ensureDemoResources(store);
   if (changed) {
     await writeStore(store);
@@ -165,7 +161,11 @@ async function readStore(): Promise<ResourcesStore> {
 }
 
 async function writeStore(store: ResourcesStore) {
-  await writeFile(resourcesFile, JSON.stringify(store, null, 2), "utf8");
+  await saveStore({
+    collectionName: "resources",
+    legacyFilePath: resourcesFile,
+    value: store,
+  });
 }
 
 async function ensureDemoResources(store: ResourcesStore): Promise<boolean> {

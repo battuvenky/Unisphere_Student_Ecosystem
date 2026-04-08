@@ -28,6 +28,8 @@ type FormState = {
   adminInviteCode: string;
 };
 
+const AUTH_TOKEN_STORAGE_KEY = "unisphere_auth_token";
+
 const defaultForm: FormState = {
   email: "",
   password: "",
@@ -145,10 +147,14 @@ export function AuthForm({ mode, nextPath = "/dashboard" }: AuthFormProps) {
         body: JSON.stringify(payload),
       });
 
-      const data = (await response.json()) as { error?: string; message?: string };
+      const data = (await response.json()) as { error?: string; message?: string; token?: string };
 
       if (!response.ok) {
         throw new Error(data.error ?? "Authentication failed");
+      }
+
+      if (typeof data.token === "string" && data.token.length > 0) {
+        window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, data.token);
       }
 
       setSuccess(data.message ?? (isSignup ? "Account created" : "Login successful"));

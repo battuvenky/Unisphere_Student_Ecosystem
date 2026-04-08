@@ -1,7 +1,8 @@
 import { randomUUID } from "crypto";
-import { mkdir, readFile, writeFile } from "fs/promises";
+import { writeFile } from "fs/promises";
 import path from "path";
 import { listPlacementData } from "@/lib/placement-store";
+import { loadStore, saveStore } from "@/lib/mongo-store";
 
 export type StudySession = {
   id: string;
@@ -49,25 +50,20 @@ function userHash(userId: string) {
   return userId.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
 }
 
-async function ensureStoreFile() {
-  await mkdir(dataDir, { recursive: true });
-
-  try {
-    await readFile(analyticsFile, "utf8");
-  } catch {
-    const initial: AnalyticsStore = { sessions: [] };
-    await writeFile(analyticsFile, JSON.stringify(initial, null, 2), "utf8");
-  }
-}
-
 async function readStore() {
-  await ensureStoreFile();
-  const raw = await readFile(analyticsFile, "utf8");
-  return JSON.parse(raw) as AnalyticsStore;
+  return loadStore<AnalyticsStore>({
+    collectionName: "analytics",
+    legacyFilePath: analyticsFile,
+    initialValue: { sessions: [] },
+  });
 }
 
 async function writeStore(store: AnalyticsStore) {
-  await writeFile(analyticsFile, JSON.stringify(store, null, 2), "utf8");
+  await saveStore({
+    collectionName: "analytics",
+    legacyFilePath: analyticsFile,
+    value: store,
+  });
 }
 
 async function ensureSeedDataForUser(userId: string) {

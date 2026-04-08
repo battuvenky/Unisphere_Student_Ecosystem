@@ -1,7 +1,8 @@
 import { randomUUID } from "crypto";
-import { mkdir, readFile, writeFile } from "fs/promises";
+import { writeFile } from "fs/promises";
 import path from "path";
 import { findUserById, listUsers } from "@/lib/users-store";
+import { loadStore, saveStore } from "@/lib/mongo-store";
 
 export type MentorshipRequestStatus = "pending" | "accepted" | "declined" | "completed" | "cancelled";
 
@@ -53,25 +54,20 @@ export type MentorshipRequestView = {
 const dataDir = path.join(process.cwd(), "data");
 const mentorshipFile = path.join(dataDir, "mentorship.json");
 
-async function ensureStoreFile() {
-  await mkdir(dataDir, { recursive: true });
-
-  try {
-    await readFile(mentorshipFile, "utf8");
-  } catch {
-    const initial: MentorshipStore = { requests: [] };
-    await writeFile(mentorshipFile, JSON.stringify(initial, null, 2), "utf8");
-  }
-}
-
 async function readStore() {
-  await ensureStoreFile();
-  const raw = await readFile(mentorshipFile, "utf8");
-  return JSON.parse(raw) as MentorshipStore;
+  return loadStore<MentorshipStore>({
+    collectionName: "mentorship",
+    legacyFilePath: mentorshipFile,
+    initialValue: { requests: [] },
+  });
 }
 
 async function writeStore(store: MentorshipStore) {
-  await writeFile(mentorshipFile, JSON.stringify(store, null, 2), "utf8");
+  await saveStore({
+    collectionName: "mentorship",
+    legacyFilePath: mentorshipFile,
+    value: store,
+  });
 }
 
 function parseYearLevel(yearText: string) {

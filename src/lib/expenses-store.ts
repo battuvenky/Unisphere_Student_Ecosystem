@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
-import { mkdir, readFile, writeFile } from "fs/promises";
+import { writeFile } from "fs/promises";
 import path from "path";
+import { loadStore, saveStore } from "@/lib/mongo-store";
 
 export type ExpenseCategory =
   | "food"
@@ -71,25 +72,20 @@ function normalizeQuery(value?: string) {
   return (value ?? "").trim().toLowerCase();
 }
 
-async function ensureStoreFile() {
-  await mkdir(dataDir, { recursive: true });
-
-  try {
-    await readFile(expensesFile, "utf8");
-  } catch {
-    const initial: ExpensesStore = { expenses: [] };
-    await writeFile(expensesFile, JSON.stringify(initial, null, 2), "utf8");
-  }
-}
-
 async function readStore(): Promise<ExpensesStore> {
-  await ensureStoreFile();
-  const raw = await readFile(expensesFile, "utf8");
-  return JSON.parse(raw) as ExpensesStore;
+  return loadStore<ExpensesStore>({
+    collectionName: "expenses",
+    legacyFilePath: expensesFile,
+    initialValue: { expenses: [] },
+  });
 }
 
 async function writeStore(store: ExpensesStore) {
-  await writeFile(expensesFile, JSON.stringify(store, null, 2), "utf8");
+  await saveStore({
+    collectionName: "expenses",
+    legacyFilePath: expensesFile,
+    value: store,
+  });
 }
 
 async function ensureSeedDataForUser(userId: string): Promise<ExpensesStore> {

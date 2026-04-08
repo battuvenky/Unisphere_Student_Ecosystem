@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
-import { mkdir, readFile, writeFile } from "fs/promises";
-import path from "path";
+import { connectMongoose } from "@/lib/mongoose";
+import { MessageModel } from "@/lib/models/message";
+import { UserModel } from "@/lib/models/user";
 
 export type FriendRequestStatus = "pending" | "accepted" | "rejected" | "cancelled";
 export type DirectMessageType = "text" | "note" | "file";
@@ -35,14 +36,22 @@ export type DirectMessage = {
   seenAt: string | null;
 };
 
-type ConnectionsStore = {
-  requests: FriendRequest[];
-  friendships: Friendship[];
-  messages: DirectMessage[];
+type UserRequestEdge = {
+  id: string;
+  userId: string;
+  status: FriendRequestStatus;
+  createdAt: string;
+  respondedAt: string | null;
 };
 
-const dataDir = path.join(process.cwd(), "data");
-const storeFile = path.join(dataDir, "connections.json");
+type ConnectionsUserDoc = {
+  appId: string;
+  friends?: string[];
+  requests?: {
+    incoming?: UserRequestEdge[];
+    outgoing?: UserRequestEdge[];
+  };
+};
 
 function nowIso() {
   return new Date().toISOString();
@@ -52,193 +61,252 @@ function makeConversationId(a: string, b: string) {
   return [a, b].sort((x, y) => x.localeCompare(y)).join("::");
 }
 
-function samePair(a1: string, b1: string, a2: string, b2: string) {
-  return (a1 === a2 && b1 === b2) || (a1 === b2 && b1 === a2);
-}
-
-async function ensureStoreFile() {
-  await mkdir(dataDir, { recursive: true });
-
-  try {
-    await readFile(storeFile, "utf8");
-  } catch {
-    const seededAt = nowIso();
-    const initial: ConnectionsStore = {
-      requests: [
-        {
-          id: randomUUID(),
-          fromUserId: "demo-student-a",
-          toUserId: "demo-admin-1",
-          status: "pending",
-          createdAt: seededAt,
-          respondedAt: null,
-        },
-      ],
-      friendships: [
-        {
-          id: randomUUID(),
-          userAId: "demo-student-a",
-          userBId: "demo-student-b",
-          createdAt: seededAt,
-        },
-      ],
-      messages: [
-        {
-          id: randomUUID(),
-          conversationId: makeConversationId("demo-student-a", "demo-student-b"),
-          senderUserId: "demo-student-a",
-          recipientUserId: "demo-student-b",
-          type: "text",
-          text: "Hey Rahul, can you review my DBMS notes before tomorrow?",
-          title: "",
-          url: "",
-          createdAt: seededAt,
-          deliveredAt: seededAt,
-          seenAt: null,
-        },
-        {
-          id: randomUUID(),
-          conversationId: makeConversationId("demo-student-a", "demo-student-b"),
-          senderUserId: "demo-student-b",
-          recipientUserId: "demo-student-a",
-          type: "text",
-          text: "Sure. Share the doc and I will add comments tonight.",
-          title: "",
-          url: "",
-          createdAt: new Date(Date.now() + 5000).toISOString(),
-          deliveredAt: new Date(Date.now() + 5000).toISOString(),
-          seenAt: null,
-        },
-      ],
-    };
-
-    await writeFile(storeFile, JSON.stringify(initial, null, 2), "utf8");
+function normalizeEdges(edges: unknown): UserRequestEdge[] {
+  if (!Array.isArray(edges)) {
+    return [];
   }
+
+  return edges
+    .map((item) => {
+      const edge = item as Partial<UserRequestEdge>;
+      if (!edge?.id || !edge?.userId || !edge?.status || !edge?.createdAt) {
+        return null;
+      }
+
+      return {
+        id: String(edge.id),
+        userId: String(edge.userId),
+        status: edge.status as FriendRequestStatus,
+        createdAt: String(edge.createdAt),
+        respondedAt: typeof edge.respondedAt === "string" ? edge.respondedAt : null,
+      };
+    })
+    .filter((item): item is UserRequestEdge => item !== null);
 }
 
-async function readStore() {
-  await ensureStoreFile();
-  const raw = await readFile(storeFile, "utf8");
-  const store = JSON.parse(raw) as ConnectionsStore;
-  let changed = false;
+function normalizeUserDoc(doc: Partial<ConnectionsUserDoc> | null): ConnectionsUserDoc | null {
+  if (!doc?.appId) {
+    return null;
+  }
 
-  store.messages = store.messages.map((message) => {
-    if (typeof message.deliveredAt !== "undefined" && typeof message.seenAt !== "undefined") {
-      return message;
-    }
+  return {
+    appId: String(doc.appId),
+    friends: Array.isArray(doc.friends) ? doc.friends.map((item) => String(item)) : [],
+    requests: {
+      incoming: normalizeEdges(doc.requests?.incoming),
+      outgoing: normalizeEdges(doc.requests?.outgoing),
+    },
+  };
+}
 
-    changed = true;
+async function getConnectionsUser(userId: string) {
+  await connectMongoose();
+  const doc = await UserModel.findOne({ appId: userId })
+    .select({ appId: 1, friends: 1, requests: 1 })
+    .lean<Partial<ConnectionsUserDoc> | null>();
+  return normalizeUserDoc(doc);
+}
+
+function edgeToRequest(edge: UserRequestEdge, ownerUserId: string, kind: "incoming" | "outgoing"): FriendRequest {
+  if (kind === "incoming") {
     return {
-      ...message,
-      deliveredAt: message.deliveredAt ?? null,
-      seenAt: message.seenAt ?? null,
+      id: edge.id,
+      fromUserId: edge.userId,
+      toUserId: ownerUserId,
+      status: edge.status,
+      createdAt: edge.createdAt,
+      respondedAt: edge.respondedAt,
     };
-  });
-
-  if (changed) {
-    await writeStore(store);
   }
 
-  return store;
+  return {
+    id: edge.id,
+    fromUserId: ownerUserId,
+    toUserId: edge.userId,
+    status: edge.status,
+    createdAt: edge.createdAt,
+    respondedAt: edge.respondedAt,
+  };
 }
 
-async function writeStore(store: ConnectionsStore) {
-  await writeFile(storeFile, JSON.stringify(store, null, 2), "utf8");
-}
-
-function areFriends(store: ConnectionsStore, userId: string, otherUserId: string) {
-  return store.friendships.some((friendship) => samePair(friendship.userAId, friendship.userBId, userId, otherUserId));
-}
-
-function hasPendingRequestBetween(store: ConnectionsStore, userId: string, otherUserId: string) {
-  return store.requests.some(
-    (request) =>
-      request.status === "pending" &&
-      samePair(request.fromUserId, request.toUserId, userId, otherUserId)
+function extractAcceptedAt(user: ConnectionsUserDoc, friendUserId: string) {
+  const acceptedIncoming = (user.requests?.incoming ?? []).filter(
+    (edge) => edge.userId === friendUserId && edge.status === "accepted"
   );
+  const acceptedOutgoing = (user.requests?.outgoing ?? []).filter(
+    (edge) => edge.userId === friendUserId && edge.status === "accepted"
+  );
+
+  const all = [...acceptedIncoming, ...acceptedOutgoing]
+    .map((edge) => edge.respondedAt ?? edge.createdAt)
+    .filter(Boolean)
+    .sort((a, b) => Date.parse(b) - Date.parse(a));
+
+  return all[0] ?? nowIso();
 }
 
-function ensureFriendship(store: ConnectionsStore, userAId: string, userBId: string) {
-  if (areFriends(store, userAId, userBId)) {
-    return;
+async function areUsersFriends(userId: string, otherUserId: string) {
+  const user = await getConnectionsUser(userId);
+  if (!user) {
+    return false;
   }
 
-  store.friendships.push({
-    id: randomUUID(),
-    userAId,
-    userBId,
-    createdAt: nowIso(),
-  });
+  return (user.friends ?? []).includes(otherUserId);
+}
+
+function mapMessageDocument(
+  doc: {
+    _id?: unknown;
+    senderId?: string;
+    receiverId?: string;
+    message?: string;
+    type?: DirectMessageType;
+    title?: string;
+    url?: string;
+    timestamp?: string;
+    deliveredAt?: string | null;
+    seenAt?: string | null;
+  }
+): DirectMessage {
+  const senderId = doc.senderId ?? "";
+  const receiverId = doc.receiverId ?? "";
+
+  return {
+    id: String(doc._id ?? ""),
+    conversationId: makeConversationId(senderId, receiverId),
+    senderUserId: senderId,
+    recipientUserId: receiverId,
+    type: (doc.type ?? "text") as DirectMessageType,
+    text: doc.message ?? "",
+    title: doc.title ?? "",
+    url: doc.url ?? "",
+    createdAt: doc.timestamp ?? nowIso(),
+    deliveredAt: doc.deliveredAt ?? null,
+    seenAt: doc.seenAt ?? null,
+  };
 }
 
 export async function listFriendRequests(userId: string) {
-  const store = await readStore();
+  const user = await getConnectionsUser(userId);
+  if (!user) {
+    return { incoming: [], outgoing: [] };
+  }
 
-  const incoming = store.requests
-    .filter((request) => request.toUserId === userId)
+  const incoming = (user.requests?.incoming ?? [])
+    .map((edge) => edgeToRequest(edge, userId, "incoming"))
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 
-  const outgoing = store.requests
-    .filter((request) => request.fromUserId === userId)
+  const outgoing = (user.requests?.outgoing ?? [])
+    .map((edge) => edgeToRequest(edge, userId, "outgoing"))
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 
   return { incoming, outgoing };
 }
 
 export async function listFriends(userId: string) {
-  const store = await readStore();
+  const user = await getConnectionsUser(userId);
+  if (!user) {
+    return [];
+  }
 
-  const friends = store.friendships
-    .filter((friendship) => friendship.userAId === userId || friendship.userBId === userId)
-    .map((friendship) => ({
-      friendship,
-      friendUserId: friendship.userAId === userId ? friendship.userBId : friendship.userAId,
-    }));
+  const friendIds = user.friends ?? [];
 
-  return friends
-    .map((item) => {
-      const conversationId = makeConversationId(userId, item.friendUserId);
-      const latestMessage = store.messages
-        .filter((message) => message.conversationId === conversationId)
-        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
+  const latestMessages = await Promise.all(
+    friendIds.map(async (friendUserId) => {
+      const doc = await MessageModel.findOne({
+        $or: [
+          { senderId: userId, receiverId: friendUserId },
+          { senderId: friendUserId, receiverId: userId },
+        ],
+      })
+        .sort({ timestamp: -1 })
+        .select({ timestamp: 1 })
+        .lean<{ timestamp?: string } | null>();
 
       return {
-        friendshipId: item.friendship.id,
-        friendUserId: item.friendUserId,
-        connectedAt: item.friendship.createdAt,
-        latestMessageAt: latestMessage?.createdAt ?? item.friendship.createdAt,
+        friendUserId,
+        latestMessageAt: doc?.timestamp ?? null,
+      };
+    })
+  );
+
+  const latestMap = new Map(latestMessages.map((item) => [item.friendUserId, item.latestMessageAt]));
+
+  return friendIds
+    .map((friendUserId) => {
+      const connectedAt = extractAcceptedAt(user, friendUserId);
+      return {
+        friendshipId: makeConversationId(userId, friendUserId),
+        friendUserId,
+        connectedAt,
+        latestMessageAt: latestMap.get(friendUserId) ?? connectedAt,
       };
     })
     .sort((a, b) => Date.parse(b.latestMessageAt) - Date.parse(a.latestMessageAt));
 }
 
 export async function sendFriendRequest(input: { fromUserId: string; toUserId: string }) {
-  const store = await readStore();
+  const [fromUser, toUser] = await Promise.all([
+    getConnectionsUser(input.fromUserId),
+    getConnectionsUser(input.toUserId),
+  ]);
+
+  if (!fromUser || !toUser) {
+    return { error: "User not found" as const };
+  }
 
   if (input.fromUserId === input.toUserId) {
     return { error: "You cannot send a request to yourself" as const };
   }
 
-  if (areFriends(store, input.fromUserId, input.toUserId)) {
+  if ((fromUser.friends ?? []).includes(input.toUserId) || (toUser.friends ?? []).includes(input.fromUserId)) {
     return { error: "You are already connected" as const };
   }
 
-  if (hasPendingRequestBetween(store, input.fromUserId, input.toUserId)) {
+  const fromOutgoing = fromUser.requests?.outgoing ?? [];
+  const fromIncoming = fromUser.requests?.incoming ?? [];
+  const hasPending = [...fromOutgoing, ...fromIncoming].some(
+    (edge) => edge.userId === input.toUserId && edge.status === "pending"
+  );
+
+  if (hasPending) {
     return { error: "A pending request already exists" as const };
   }
 
-  const request: FriendRequest = {
+  const request: UserRequestEdge = {
     id: randomUUID(),
-    fromUserId: input.fromUserId,
-    toUserId: input.toUserId,
+    userId: input.toUserId,
     status: "pending",
     createdAt: nowIso(),
     respondedAt: null,
   };
 
-  store.requests.push(request);
-  await writeStore(store);
-  return { request };
+  const reciprocal: UserRequestEdge = {
+    id: request.id,
+    userId: input.fromUserId,
+    status: "pending",
+    createdAt: request.createdAt,
+    respondedAt: null,
+  };
+
+  const nextOutgoing = [...(fromUser.requests?.outgoing ?? []), request];
+  const nextIncoming = [...(toUser.requests?.incoming ?? []), reciprocal];
+
+  await Promise.all([
+    UserModel.updateOne({ appId: input.fromUserId }, { $set: { "requests.outgoing": nextOutgoing } }),
+    UserModel.updateOne({ appId: input.toUserId }, { $set: { "requests.incoming": nextIncoming } }),
+  ]);
+
+  return {
+    request: {
+      id: request.id,
+      fromUserId: input.fromUserId,
+      toUserId: input.toUserId,
+      status: request.status,
+      createdAt: request.createdAt,
+      respondedAt: request.respondedAt,
+    },
+  };
 }
 
 export async function respondToFriendRequest(input: {
@@ -246,61 +314,126 @@ export async function respondToFriendRequest(input: {
   userId: string;
   action: "accept" | "reject" | "cancel";
 }) {
-  const store = await readStore();
-  const request = store.requests.find((item) => item.id === input.requestId);
+  await connectMongoose();
 
-  if (!request) {
+  const [senderUser, recipientUser] = await Promise.all([
+    UserModel.findOne({ "requests.outgoing.id": input.requestId })
+      .select({ appId: 1, friends: 1, requests: 1 })
+      .lean<Partial<ConnectionsUserDoc> | null>(),
+    UserModel.findOne({ "requests.incoming.id": input.requestId })
+      .select({ appId: 1, friends: 1, requests: 1 })
+      .lean<Partial<ConnectionsUserDoc> | null>(),
+  ]);
+
+  const sender = normalizeUserDoc(senderUser);
+  const recipient = normalizeUserDoc(recipientUser);
+
+  if (!sender || !recipient) {
     return { error: "Request not found" as const };
   }
 
-  if (request.status !== "pending") {
+  const senderOutgoing = [...(sender.requests?.outgoing ?? [])];
+  const recipientIncoming = [...(recipient.requests?.incoming ?? [])];
+
+  const outgoingIndex = senderOutgoing.findIndex((item) => item.id === input.requestId);
+  const incomingIndex = recipientIncoming.findIndex((item) => item.id === input.requestId);
+
+  if (outgoingIndex < 0 || incomingIndex < 0) {
+    return { error: "Request not found" as const };
+  }
+
+  const outgoingRequest = senderOutgoing[outgoingIndex];
+  const incomingRequest = recipientIncoming[incomingIndex];
+
+  if (outgoingRequest.status !== "pending" || incomingRequest.status !== "pending") {
     return { error: "Request is no longer active" as const };
   }
 
   if (input.action === "cancel") {
-    if (request.fromUserId !== input.userId) {
+    if (sender.appId !== input.userId) {
       return { error: "Only the sender can cancel this request" as const };
     }
 
-    request.status = "cancelled";
-    request.respondedAt = nowIso();
-    await writeStore(store);
-    return { request };
+    const respondedAt = nowIso();
+    senderOutgoing[outgoingIndex] = { ...outgoingRequest, status: "cancelled", respondedAt };
+    recipientIncoming[incomingIndex] = { ...incomingRequest, status: "cancelled", respondedAt };
+
+    await Promise.all([
+      UserModel.updateOne({ appId: sender.appId }, { $set: { "requests.outgoing": senderOutgoing } }),
+      UserModel.updateOne({ appId: recipient.appId }, { $set: { "requests.incoming": recipientIncoming } }),
+    ]);
+
+    return {
+      request: {
+        id: outgoingRequest.id,
+        fromUserId: sender.appId,
+        toUserId: recipient.appId,
+        status: "cancelled",
+        createdAt: outgoingRequest.createdAt,
+        respondedAt,
+      },
+    };
   }
 
-  if (request.toUserId !== input.userId) {
+  if (recipient.appId !== input.userId) {
     return { error: "Only the recipient can respond to this request" as const };
   }
 
-  request.status = input.action === "accept" ? "accepted" : "rejected";
-  request.respondedAt = nowIso();
+  const nextStatus: FriendRequestStatus = input.action === "accept" ? "accepted" : "rejected";
+  const respondedAt = nowIso();
+  senderOutgoing[outgoingIndex] = { ...outgoingRequest, status: nextStatus, respondedAt };
+  recipientIncoming[incomingIndex] = { ...incomingRequest, status: nextStatus, respondedAt };
 
   if (input.action === "accept") {
-    ensureFriendship(store, request.fromUserId, request.toUserId);
+    await Promise.all([
+      UserModel.updateOne(
+        { appId: sender.appId },
+        {
+          $set: { "requests.outgoing": senderOutgoing },
+          $addToSet: { friends: recipient.appId },
+        }
+      ),
+      UserModel.updateOne(
+        { appId: recipient.appId },
+        {
+          $set: { "requests.incoming": recipientIncoming },
+          $addToSet: { friends: sender.appId },
+        }
+      ),
+    ]);
+  } else {
+    await Promise.all([
+      UserModel.updateOne({ appId: sender.appId }, { $set: { "requests.outgoing": senderOutgoing } }),
+      UserModel.updateOne({ appId: recipient.appId }, { $set: { "requests.incoming": recipientIncoming } }),
+    ]);
   }
 
-  await writeStore(store);
-  return { request };
+  return {
+    request: {
+      id: outgoingRequest.id,
+      fromUserId: sender.appId,
+      toUserId: recipient.appId,
+      status: nextStatus,
+      createdAt: outgoingRequest.createdAt,
+      respondedAt,
+    },
+  };
 }
 
 export async function listSuggestedUsers(input: { userId: string; candidateUserIds: string[] }) {
-  const store = await readStore();
+  const user = await getConnectionsUser(input.userId);
+  if (!user) {
+    return [];
+  }
 
-  const connectedIds = new Set(
-    store.friendships
-      .filter((friendship) => friendship.userAId === input.userId || friendship.userBId === input.userId)
-      .map((friendship) => (friendship.userAId === input.userId ? friendship.userBId : friendship.userAId))
-  );
-
-  const blockedByPending = new Set(
-    store.requests
-      .filter(
-        (request) =>
-          request.status === "pending" &&
-          (request.fromUserId === input.userId || request.toUserId === input.userId)
-      )
-      .map((request) => (request.fromUserId === input.userId ? request.toUserId : request.fromUserId))
-  );
+  const connectedIds = new Set(user.friends ?? []);
+  const pendingIncoming = (user.requests?.incoming ?? [])
+    .filter((edge) => edge.status === "pending")
+    .map((edge) => edge.userId);
+  const pendingOutgoing = (user.requests?.outgoing ?? [])
+    .filter((edge) => edge.status === "pending")
+    .map((edge) => edge.userId);
+  const blockedByPending = new Set([...pendingIncoming, ...pendingOutgoing]);
 
   return input.candidateUserIds.filter(
     (candidateId) =>
@@ -311,18 +444,41 @@ export async function listSuggestedUsers(input: { userId: string; candidateUserI
 }
 
 export async function listConversation(input: { userId: string; friendUserId: string }) {
-  const store = await readStore();
-
-  if (!areFriends(store, input.userId, input.friendUserId)) {
+  const isFriend = await areUsersFriends(input.userId, input.friendUserId);
+  if (!isFriend) {
     return { error: "You can only chat with connected friends" as const };
   }
 
-  const conversationId = makeConversationId(input.userId, input.friendUserId);
-  const messages = store.messages
-    .filter((message) => message.conversationId === conversationId)
-    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  await connectMongoose();
 
-  return { conversationId, messages };
+  const docs = await MessageModel.find({
+    $or: [
+      { senderId: input.userId, receiverId: input.friendUserId },
+      { senderId: input.friendUserId, receiverId: input.userId },
+    ],
+  })
+    .sort({ timestamp: 1 })
+    .lean<
+      Array<{
+        _id: unknown;
+        senderId: string;
+        receiverId: string;
+        message: string;
+        type: DirectMessageType;
+        title: string;
+        url: string;
+        timestamp: string;
+        deliveredAt?: string | null;
+        seenAt?: string | null;
+      }>
+    >();
+
+  const messages = docs.map((doc) => mapMessageDocument(doc));
+
+  return {
+    conversationId: makeConversationId(input.userId, input.friendUserId),
+    messages,
+  };
 }
 
 export async function sendDirectMessage(input: {
@@ -333,9 +489,8 @@ export async function sendDirectMessage(input: {
   title?: string;
   url?: string;
 }) {
-  const store = await readStore();
-
-  if (!areFriends(store, input.senderUserId, input.recipientUserId)) {
+  const isFriend = await areUsersFriends(input.senderUserId, input.recipientUserId);
+  if (!isFriend) {
     return { error: "You can only chat with connected friends" as const };
   }
 
@@ -355,86 +510,151 @@ export async function sendDirectMessage(input: {
     return { error: "Shared item URL is required" as const };
   }
 
-  const message: DirectMessage = {
-    id: randomUUID(),
-    conversationId: makeConversationId(input.senderUserId, input.recipientUserId),
-    senderUserId: input.senderUserId,
-    recipientUserId: input.recipientUserId,
+  await connectMongoose();
+  const timestamp = nowIso();
+
+  const created = await MessageModel.create({
+    senderId: input.senderUserId,
+    receiverId: input.recipientUserId,
+    message: text,
     type: input.type,
-    text,
     title,
     url,
-    createdAt: nowIso(),
+    timestamp,
     deliveredAt: null,
     seenAt: null,
+  });
+
+  return {
+    message: {
+      id: String(created._id),
+      conversationId: makeConversationId(input.senderUserId, input.recipientUserId),
+      senderUserId: input.senderUserId,
+      recipientUserId: input.recipientUserId,
+      type: input.type,
+      text,
+      title,
+      url,
+      createdAt: timestamp,
+      deliveredAt: null,
+      seenAt: null,
+    },
   };
-
-  store.messages.push(message);
-  await writeStore(store);
-
-  return { message };
 }
 
 export async function markMessageDelivered(input: {
   messageId: string;
   recipientUserId: string;
 }) {
-  const store = await readStore();
-  const message = store.messages.find((item) => item.id === input.messageId);
+  await connectMongoose();
+
+  const message = await MessageModel.findById(input.messageId).lean<{
+    _id: unknown;
+    senderId: string;
+    receiverId: string;
+    message: string;
+    type: DirectMessageType;
+    title: string;
+    url: string;
+    timestamp: string;
+    deliveredAt?: string | null;
+    seenAt?: string | null;
+  } | null>();
 
   if (!message) {
     return { error: "Message not found" as const };
   }
 
-  if (message.recipientUserId !== input.recipientUserId) {
+  if (message.receiverId !== input.recipientUserId) {
     return { error: "Not allowed" as const };
   }
 
   if (!message.deliveredAt) {
-    message.deliveredAt = nowIso();
-    await writeStore(store);
+    const deliveredAt = nowIso();
+    await MessageModel.updateOne({ _id: message._id }, { $set: { deliveredAt } });
+    message.deliveredAt = deliveredAt;
   }
 
-  return { message };
+  return {
+    message: {
+      id: String(message._id),
+      conversationId: makeConversationId(message.senderId, message.receiverId),
+      senderUserId: message.senderId,
+      recipientUserId: message.receiverId,
+      type: message.type,
+      text: message.message,
+      title: message.title,
+      url: message.url,
+      createdAt: message.timestamp,
+      deliveredAt: message.deliveredAt ?? null,
+      seenAt: message.seenAt ?? null,
+    },
+  };
 }
 
 export async function markConversationSeen(input: {
   viewerUserId: string;
   friendUserId: string;
 }) {
-  const store = await readStore();
-
-  if (!areFriends(store, input.viewerUserId, input.friendUserId)) {
+  const isFriend = await areUsersFriends(input.viewerUserId, input.friendUserId);
+  if (!isFriend) {
     return { error: "You can only chat with connected friends" as const };
   }
 
-  const conversationId = makeConversationId(input.viewerUserId, input.friendUserId);
+  await connectMongoose();
+
+  const docs = await MessageModel.find({
+    senderId: input.friendUserId,
+    receiverId: input.viewerUserId,
+    $or: [{ deliveredAt: null }, { seenAt: null }],
+  }).lean<
+    Array<{
+      _id: unknown;
+      senderId: string;
+      receiverId: string;
+      message: string;
+      type: DirectMessageType;
+      title: string;
+      url: string;
+      timestamp: string;
+      deliveredAt?: string | null;
+      seenAt?: string | null;
+    }>
+  >();
+
   const updates: DirectMessage[] = [];
 
-  for (const message of store.messages) {
-    if (
-      message.conversationId === conversationId &&
-      message.senderUserId === input.friendUserId &&
-      message.recipientUserId === input.viewerUserId
-    ) {
-      let changed = false;
-      if (!message.deliveredAt) {
-        message.deliveredAt = nowIso();
-        changed = true;
+  for (const doc of docs) {
+    const deliveredAt = doc.deliveredAt ?? nowIso();
+    const seenAt = doc.seenAt ?? nowIso();
+
+    await MessageModel.updateOne(
+      { _id: doc._id },
+      {
+        $set: {
+          deliveredAt,
+          seenAt,
+        },
       }
-      if (!message.seenAt) {
-        message.seenAt = nowIso();
-        changed = true;
-      }
-      if (changed) {
-        updates.push(message);
-      }
-    }
+    );
+
+    updates.push({
+      id: String(doc._id),
+      conversationId: makeConversationId(doc.senderId, doc.receiverId),
+      senderUserId: doc.senderId,
+      recipientUserId: doc.receiverId,
+      type: doc.type,
+      text: doc.message,
+      title: doc.title,
+      url: doc.url,
+      createdAt: doc.timestamp,
+      deliveredAt,
+      seenAt,
+    });
   }
 
-  if (updates.length > 0) {
-    await writeStore(store);
-  }
-
-  return { updates, conversationId };
+  return {
+    updates,
+    conversationId: makeConversationId(input.viewerUserId, input.friendUserId),
+  };
 }

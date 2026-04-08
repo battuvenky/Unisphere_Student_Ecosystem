@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
-import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 import { listTasks } from "@/lib/tasks-store";
+import { loadStore, saveStore } from "@/lib/mongo-store";
 
 export type ScheduleCategory = "class" | "study" | "exam" | "event";
 
@@ -86,25 +86,20 @@ function getWeekdayFromDateString(value: string) {
   return new Date(parsed).getDay();
 }
 
-async function ensureStoreFile() {
-  await mkdir(dataDir, { recursive: true });
-
-  try {
-    await readFile(schedulerFile, "utf8");
-  } catch {
-    const initial: SchedulerStore = { blocks: [] };
-    await writeFile(schedulerFile, JSON.stringify(initial, null, 2), "utf8");
-  }
-}
-
 async function readStore(): Promise<SchedulerStore> {
-  await ensureStoreFile();
-  const raw = await readFile(schedulerFile, "utf8");
-  return JSON.parse(raw) as SchedulerStore;
+  return loadStore<SchedulerStore>({
+    collectionName: "scheduler",
+    legacyFilePath: schedulerFile,
+    initialValue: { blocks: [] },
+  });
 }
 
 async function writeStore(store: SchedulerStore) {
-  await writeFile(schedulerFile, JSON.stringify(store, null, 2), "utf8");
+  await saveStore({
+    collectionName: "scheduler",
+    legacyFilePath: schedulerFile,
+    value: store,
+  });
 }
 
 async function ensureSeedDataForUser(userId: string): Promise<SchedulerStore> {

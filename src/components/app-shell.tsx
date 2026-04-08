@@ -29,6 +29,8 @@ import { NotificationDropdown } from "@/components/notifications/notification-dr
 import type { SessionUser } from "@/lib/auth/types";
 import { getRealtimeSocket } from "@/lib/realtime-client";
 
+const AUTH_TOKEN_STORAGE_KEY = "unisphere_auth_token";
+
 type AppShellProps = {
   children: React.ReactNode;
   user: SessionUser;
@@ -120,6 +122,7 @@ export function AppShell({ children, user }: AppShellProps) {
     try {
       await fetch("/api/auth/logout", { method: "POST" });
     } finally {
+      window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
       router.push("/login");
       router.refresh();
     }

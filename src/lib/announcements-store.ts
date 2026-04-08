@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
-import { mkdir, readFile, writeFile } from "fs/promises";
+import { writeFile } from "fs/promises";
 import path from "path";
+import { loadStore, saveStore } from "@/lib/mongo-store";
 
 export type AnnouncementRecord = {
   id: string;
@@ -22,13 +23,11 @@ type AnnouncementsStore = {
 const dataDir = path.join(process.cwd(), "data");
 const announcementsFile = path.join(dataDir, "announcements.json");
 
-async function ensureStoreFile() {
-  await mkdir(dataDir, { recursive: true });
-
-  try {
-    await readFile(announcementsFile, "utf8");
-  } catch {
-    const initial: AnnouncementsStore = {
+async function readStore(): Promise<AnnouncementsStore> {
+  return loadStore<AnnouncementsStore>({
+    collectionName: "announcements",
+    legacyFilePath: announcementsFile,
+    initialValue: {
       announcements: [
         {
           id: "demo-announcement-orientation",
@@ -43,20 +42,16 @@ async function ensureStoreFile() {
           updatedAt: "2026-03-28T09:00:00.000Z",
         },
       ],
-    };
-
-    await writeFile(announcementsFile, JSON.stringify(initial, null, 2), "utf8");
-  }
-}
-
-async function readStore(): Promise<AnnouncementsStore> {
-  await ensureStoreFile();
-  const raw = await readFile(announcementsFile, "utf8");
-  return JSON.parse(raw) as AnnouncementsStore;
+    },
+  });
 }
 
 async function writeStore(store: AnnouncementsStore) {
-  await writeFile(announcementsFile, JSON.stringify(store, null, 2), "utf8");
+  await saveStore({
+    collectionName: "announcements",
+    legacyFilePath: announcementsFile,
+    value: store,
+  });
 }
 
 export async function listAnnouncements(): Promise<AnnouncementRecord[]> {

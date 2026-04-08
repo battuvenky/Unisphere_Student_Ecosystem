@@ -44,6 +44,7 @@ export async function GET() {
           year: record.profile.year,
           specialization: record.profile.specialization ?? "",
           avatar: initials(record.profile.fullName),
+          profileImageUrl: record.profile.profileImageUrl ?? "",
         },
       ])
     );

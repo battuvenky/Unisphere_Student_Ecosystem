@@ -14,6 +14,7 @@ type ConnectionUser = {
   year: string;
   specialization: string;
   avatar: string;
+  profileImageUrl?: string;
 };
 
 type FriendRecord = {
@@ -52,6 +53,10 @@ type ConnectionsResponse = {
     outgoing: RequestOutgoing[];
   };
   suggested: ConnectionUser[];
+};
+
+type UsersSearchResponse = {
+  users: ConnectionUser[];
 };
 
 type DirectMessage = {
@@ -159,6 +164,8 @@ export function ConnectionsHub() {
   const [friendSearchQuery, setFriendSearchQuery] = useState("");
   const [requestSearchQuery, setRequestSearchQuery] = useState("");
   const [connectSearchQuery, setConnectSearchQuery] = useState("");
+  const [searchedUsers, setSearchedUsers] = useState<ConnectionUser[]>([]);
+  const [isSearchingUsers, setIsSearchingUsers] = useState(false);
 
   const [showSharePanel, setShowSharePanel] = useState(false);
   const [notes, setNotes] = useState<Array<{ id: string; title: string; category: string; updatedAt: string }>>([]);
@@ -224,18 +231,9 @@ export function ConnectionsHub() {
   }, [pendingIncoming, requestSearchQuery]);
 
   const filteredSuggested = useMemo(() => {
-    const query = connectSearchQuery.trim().toLowerCase();
-    if (!query) {
-      return suggested;
-    }
-
-    return suggested.filter((person) => {
-      const name = person.fullName.toLowerCase();
-      const department = person.department.toLowerCase();
-      const specialization = person.specialization.toLowerCase();
-      return name.includes(query) || department.includes(query) || specialization.includes(query);
-    });
-  }, [suggested, connectSearchQuery]);
+    const hasSearch = connectSearchQuery.trim().length > 0;
+    return hasSearch ? searchedUsers : suggested;
+  }, [suggested, connectSearchQuery, searchedUsers]);
 
   const visibleMessages = useMemo(() => {
     return messages.slice(-visibleMessagesLimit);
@@ -345,6 +343,55 @@ export function ConnectionsHub() {
   useEffect(() => {
     void loadConnections();
   }, []);
+
+  useEffect(() => {
+    const query = connectSearchQuery.trim();
+
+    if (!query) {
+      setSearchedUsers([]);
+      setIsSearchingUsers(false);
+      return;
+    }
+
+    let disposed = false;
+    const timer = setTimeout(() => {
+      void (async () => {
+        setIsSearchingUsers(true);
+
+        try {
+          const response = await fetch(`/api/users/search?q=${encodeURIComponent(query)}`, {
+            cache: "no-store",
+          });
+
+          const payload = (await response.json()) as UsersSearchResponse | { error?: string };
+
+          if (!response.ok) {
+            if (!disposed) {
+              setSearchedUsers([]);
+            }
+            return;
+          }
+
+          if (!disposed) {
+            setSearchedUsers((payload as UsersSearchResponse).users ?? []);
+          }
+        } catch {
+          if (!disposed) {
+            setSearchedUsers([]);
+          }
+        } finally {
+          if (!disposed) {
+            setIsSearchingUsers(false);
+          }
+        }
+      })();
+    }, 220);
+
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+    };
+  }, [connectSearchQuery]);
 
   useEffect(() => {
     if (!activeFriendId) {
@@ -840,6 +887,9 @@ export function ConnectionsHub() {
                       </span>
                       <span className="block text-xs text-[var(--text-secondary)]">{formatRelative(friend.latestMessageAt)}</span>
                     </span>
+                    <span className="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-emerald-700">
+                      Accepted
+                    </span>
                   </button>
                 );
               })}
@@ -1067,9 +1117,14 @@ export function ConnectionsHub() {
             <div className="space-y-2">
               {filteredPendingIncoming.map((request) => (
                 <div key={request.id} className="fade-slide-enter rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3">
-                  <p className="text-sm font-semibold text-[var(--text-primary)]">
-                    {highlightMatch(request.fromUser?.fullName ?? "Unknown", requestSearchQuery)}
-                  </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-[var(--text-primary)]">
+                      {highlightMatch(request.fromUser?.fullName ?? "Unknown", requestSearchQuery)}
+                    </p>
+                    <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-700">
+                      Pending
+                    </span>
+                  </div>
                   <p className="text-xs text-[var(--text-secondary)]">
                     {highlightMatch(request.fromUser?.department ?? "General", requestSearchQuery)}
                   </p>
@@ -1121,18 +1176,39 @@ export function ConnectionsHub() {
             </label>
 
             <div className="space-y-2">
+              {isSearchingUsers ? (
+                <p className="fade-slide-enter rounded-2xl border border-dashed border-[var(--border)] px-3 py-3 text-center text-xs text-[var(--text-secondary)]">
+                  Searching users...
+                </p>
+              ) : null}
+
               {filteredSuggested.slice(0, 6).map((person) => (
-                <div key={person.id} className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3">
-                  <p className="text-sm font-semibold text-[var(--text-primary)]">{highlightMatch(person.fullName, connectSearchQuery)}</p>
-                  <p className="text-xs text-[var(--text-secondary)]">{highlightMatch(`${person.department} · ${person.year}`, connectSearchQuery)}</p>
-                  <p className="mt-1 line-clamp-1 text-xs text-[var(--text-secondary)]">{highlightMatch(person.specialization || "General", connectSearchQuery)}</p>
+                <div key={person.id} className="fade-slide-enter rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3">
+                  <div className="flex items-center gap-2.5">
+                    {person.profileImageUrl ? (
+                      <img
+                        src={person.profileImageUrl}
+                        alt={person.fullName}
+                        className="h-10 w-10 rounded-xl object-cover ring-1 ring-[var(--border)]"
+                      />
+                    ) : (
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--accent)]/12 text-xs font-bold text-[var(--accent)] ring-1 ring-[var(--border)]">
+                        {person.avatar}
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-[var(--text-primary)]">{highlightMatch(person.fullName, connectSearchQuery)}</p>
+                      <p className="text-xs text-[var(--text-secondary)]">{highlightMatch(`${person.department} · ${person.year}`, connectSearchQuery)}</p>
+                    </div>
+                  </div>
+                  <p className="mt-2 line-clamp-1 text-xs text-[var(--text-secondary)]">{highlightMatch(person.specialization || "General", connectSearchQuery)}</p>
                   <button
                     type="button"
                     onClick={() => void sendRequest(person.id)}
                     disabled={sendingRequestId === person.id}
                     className="mt-2 inline-flex items-center gap-1 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-xs font-semibold text-[var(--text-primary)] disabled:opacity-60"
                   >
-                    <UserPlus size={12} /> {sendingRequestId === person.id ? "Sending..." : "Connect"}
+                    <UserPlus size={12} /> {sendingRequestId === person.id ? "Sending..." : "Add friend"}
                   </button>
                 </div>
               ))}
@@ -1158,7 +1234,12 @@ export function ConnectionsHub() {
                   .slice(0, 5)
                   .map((request) => (
                     <div key={request.id} className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3">
-                      <p className="text-sm font-semibold text-[var(--text-primary)]">{request.toUser?.fullName ?? "Unknown"}</p>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-[var(--text-primary)]">{request.toUser?.fullName ?? "Unknown"}</p>
+                        <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-700">
+                          Pending
+                        </span>
+                      </div>
                       <button
                         type="button"
                         onClick={() => void updateRequest(request.id, "cancel")}
